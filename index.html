@@ -2,94 +2,98 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>軽量動画リスト</title>
+  <title>軽量動画リスト（デバッグ版）</title>
   <style>
-    .video-item {
-      cursor: pointer;
-      margin-bottom: 20px;
-    }
-    .video-item img {
-      max-width: 100%;
-      display: block;
-    }
-    iframe {
-      width: 100%;
-      max-width: 560px;
-      height: 315px;
-    }
+    .video-item { cursor: pointer; margin-bottom: 20px; }
+    .video-item img { max-width: 100%; display: block; }
+    iframe { width: 100%; max-width: 560px; height: 315px; }
+    .error { color: white; background: #c00; padding: 8px; border-radius: 6px; }
+    pre { white-space: pre-wrap; word-break: break-word; background:#f6f6f6; padding:8px; border-radius:6px; }
   </style>
 </head>
-
 <body>
-  <h1>動画一覧（クリックで再生）</h1>
+  <h1>動画一覧（デバッグ）</h1>
   <div id="videos">読み込み中...</div>
+  <div id="errorArea"></div>
 
   <script>
-    const apiKey = "AIzaSyAxk1YpQSe-qDtFUSUmnjnduanag41Mlyk"; // ★自分のAPIキー
-    const playlistId = "PLExT6MVBKs2BOFn2KPX6FYLQ8btIpOZ5l";   // ★新しい再生リストID
+    const apiKey = "AIzaSyAxk1YpQSe-qDtFUSUmnjnduanag41Mlyk"; // あなたのAPIキー
+    const playlistId = "PLExT6MVBKs2BOFn2KPX6FYLQ8btIpOZ5l";   // 対象の再生リスト
 
     const container = document.getElementById("videos");
+    const errorArea = document.getElementById("errorArea");
 
-    // 全ページを再帰的に取得
     async function fetchAllVideos(pageToken = "", allItems = []) {
       const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${playlistId}&key=${apiKey}&pageToken=${pageToken}`;
 
+      // fetch のレスポンス全体を確認するために一度受け取る
       const res = await fetch(url);
-      const data = await res.json();
-
-      if (data.items) {
-        allItems = allItems.concat(data.items);
+      let data;
+      try {
+        data = await res.json();
+      } catch (e) {
+        // JSON パースエラー
+        throw { message: "レスポンスがJSONではありません", status: res.status, raw: await res.text() };
       }
 
-      if (data.nextPageToken) {
-        return fetchAllVideos(data.nextPageToken, allItems);
+      // ステータスコードが 200 以外ならエラーとして投げる（詳細を保持）
+      if (!res.ok) {
+        throw { message: "API エラー", status: res.status, data };
       }
 
+      if (data.items) allItems = allItems.concat(data.items);
+      if (data.nextPageToken) return fetchAllVideos(data.nextPageToken, allItems);
       return allItems;
     }
 
     // 初期読み込み
-    fetchAllVideos()
-      .then(items => {
+    (async () => {
+      try {
+        const items = await fetchAllVideos();
         container.innerHTML = "";
-
         if (!items.length) {
           container.innerText = "動画が見つかりませんでした。";
           return;
         }
-
         items.forEach(item => {
           const title = item.snippet.title;
-          const videoId = item.snippet.resourceId.videoId;
-          const thumbnail = item.snippet.thumbnails.medium.url;
+          const videoId = item.snippet.resourceId && item.snippet.resourceId.videoId;
+          const thumbnail = item.snippet.thumbnails && item.snippet.thumbnails.medium && item.snippet.thumbnails.medium.url;
 
           const div = document.createElement("div");
           div.className = "video-item";
-
           div.innerHTML = `
-            <img src="${thumbnail}" alt="${title}" loading="lazy" />
+            <img src="${thumbnail || ''}" alt="${title}" loading="lazy" />
             <p>${title}</p>
           `;
-
-          // クリックで YouTube 埋め込みに置き換える
           div.onclick = () => {
-            div.innerHTML = `
-              <iframe src="https://www.youtube.com/embed/${videoId}?rel=0"
-                frameborder="0"
-                allowfullscreen
-                loading="lazy">
-              </iframe>
-            `;
+            if (!videoId) return alert("videoId が取得できません。");
+            div.innerHTML = \`
+              <iframe src="https://www.youtube.com/embed/\${videoId}?rel=0"
+                frameborder="0" allowfullscreen loading="lazy"></iframe>
+            \`;
           };
-
           container.appendChild(div);
         });
-      })
-      .catch(err => {
-        container.innerText = "APIエラーが発生しました。";
-        console.error(err);
-      });
-  </script>
+      } catch (err) {
+        // 画面表示とコンソールに詳しく出す
+        console.error("fetchAllVideos error:", err);
+        errorArea.innerHTML = `
+          <div class="error">APIエラーが発生しました（詳細は下記）</div>
+          <h3>エラー詳細（開発者向け）</h3>
+          <pre>${escapeHtml(JSON.stringify(err, null, 2))}</pre>
+          <p>ブラウザのコンソールにさらに情報が出力されています。</p>
+        `;
+      }
+    })();
 
+    // 表示用エスケープ
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+  </script>
 </body>
 </html>
